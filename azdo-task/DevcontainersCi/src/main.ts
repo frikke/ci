@@ -41,11 +41,14 @@ export async function runMain(): Promise<void> {
 		const imageTag = task.getInput('imageTag');
 		const platform = task.getInput('platform');
 		const subFolder = task.getInput('subFolder') ?? '.';
+		const relativeConfigFile = task.getInput('configFile');
 		const runCommand = task.getInput('runCmd');
 		const envs = task.getInput('env')?.split('\n') ?? [];
-		const inputEnvsWithDefaults = populateDefaults(envs);
+		const inheritEnv = (task.getInput('inheritEnv') ?? 'false') === 'true';
+		const inputEnvsWithDefaults = populateDefaults(envs, inheritEnv);
 		const cacheFrom = task.getInput('cacheFrom')?.split('\n') ?? [];
 		const noCache = (task.getInput('noCache') ?? 'false') === 'true';
+		const cacheTo = task.getInput('cacheTo')?.split('\n') ?? [];
 		const skipContainerUserIdUpdate =
 			(task.getInput('skipContainerUserIdUpdate') ?? 'false') === 'true';
 
@@ -62,9 +65,11 @@ export async function runMain(): Promise<void> {
 
 		const log = (message: string): void => console.log(message);
 		const workspaceFolder = path.resolve(checkoutPath, subFolder);
+		const configFile =
+			relativeConfigFile && path.resolve(checkoutPath, relativeConfigFile);
 
 		const resolvedImageTag = imageTag ?? 'latest';
-		const imageTagArray = resolvedImageTag.split(',');
+		const imageTagArray = resolvedImageTag.split(/\s*,\s*/);
 		const fullImageNameArray: string[] = [];
 		for (const tag of imageTagArray) {
 			fullImageNameArray.push(`${imageName}:${tag}`);
@@ -91,11 +96,13 @@ export async function runMain(): Promise<void> {
 		}
 		const buildArgs: DevContainerCliBuildArgs = {
 			workspaceFolder,
+			configFile,
 			imageName: fullImageNameArray,
 			platform,
 			additionalCacheFroms: cacheFrom,
 			output: buildxOutput,
 			noCache,
+			cacheTo,
 		};
 
 		console.log('\n\n');
@@ -120,6 +127,7 @@ export async function runMain(): Promise<void> {
 			console.log('***');
 			const upArgs: DevContainerCliUpArgs = {
 				workspaceFolder,
+				configFile,
 				additionalCacheFroms: cacheFrom,
 				skipContainerUserIdUpdate,
 				env: inputEnvsWithDefaults,
@@ -141,6 +149,7 @@ export async function runMain(): Promise<void> {
 			console.log('***');
 			const execArgs: DevContainerCliExecArgs = {
 				workspaceFolder,
+				configFile,
 				command: ['bash', '-c', runCommand],
 				env: inputEnvsWithDefaults,
 			};
@@ -249,7 +258,7 @@ export async function runPost(): Promise<void> {
 		return;
 	}
 	const imageTag = task.getInput('imageTag') ?? 'latest';
-	const imageTagArray = imageTag.split(',');
+	const imageTagArray = imageTag.split(/\s*,\s*/);
 	const platform = task.getInput('platform');
 	if (platform) {
 		for (const tag of imageTagArray) {

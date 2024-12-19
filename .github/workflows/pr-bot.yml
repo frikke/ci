@@ -9,7 +9,11 @@ on:
     # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#issue_comment
     # https://docs.github.com/en/developers/webhooks-and-events/webhooks/webhook-events-and-payloads#issue_comment
 
-
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  checks: write
 
 jobs:
   pr_comment:
