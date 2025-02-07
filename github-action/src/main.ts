@@ -48,11 +48,16 @@ export async function runMain(): Promise<void> {
 		const imageTag = emptyStringAsUndefined(core.getInput('imageTag'));
 		const platform = emptyStringAsUndefined(core.getInput('platform'));
 		const subFolder: string = core.getInput('subFolder');
+		const relativeConfigFile = emptyStringAsUndefined(
+			core.getInput('configFile'),
+		);
 		const runCommand = core.getInput('runCmd');
 		const inputEnvs: string[] = core.getMultilineInput('env');
-		const inputEnvsWithDefaults = populateDefaults(inputEnvs);
+		const inheritEnv: boolean = core.getBooleanInput('inheritEnv');
+		const inputEnvsWithDefaults = populateDefaults(inputEnvs, inheritEnv);
 		const cacheFrom: string[] = core.getMultilineInput('cacheFrom');
 		const noCache: boolean = core.getBooleanInput('noCache');
+		const cacheTo: string[] = core.getMultilineInput('cacheTo');
 		const skipContainerUserIdUpdate = core.getBooleanInput(
 			'skipContainerUserIdUpdate',
 		);
@@ -72,9 +77,11 @@ export async function runMain(): Promise<void> {
 
 		const log = (message: string): void => core.info(message);
 		const workspaceFolder = path.resolve(checkoutPath, subFolder);
+		const configFile =
+			relativeConfigFile && path.resolve(checkoutPath, relativeConfigFile);
 
 		const resolvedImageTag = imageTag ?? 'latest';
-		const imageTagArray = resolvedImageTag.split(',');
+		const imageTagArray = resolvedImageTag.split(/\s*,\s*/);
 		const fullImageNameArray: string[] = [];
 		for (const tag of imageTagArray) {
 			fullImageNameArray.push(`${imageName}:${tag}`);
@@ -108,12 +115,14 @@ export async function runMain(): Promise<void> {
 		const buildResult = await core.group('🏗️ build container', async () => {
 			const args: DevContainerCliBuildArgs = {
 				workspaceFolder,
+				configFile,
 				imageName: fullImageNameArray,
 				platform,
 				additionalCacheFroms: cacheFrom,
 				userDataFolder,
 				output: buildxOutput,
 				noCache,
+				cacheTo,
 			};
 			const result = await devcontainer.build(args, log);
 
@@ -142,6 +151,7 @@ export async function runMain(): Promise<void> {
 			const upResult = await core.group('🏃 start container', async () => {
 				const args: DevContainerCliUpArgs = {
 					workspaceFolder,
+					configFile,
 					additionalCacheFroms: cacheFrom,
 					skipContainerUserIdUpdate,
 					env: inputEnvsWithDefaults,
@@ -161,38 +171,33 @@ export async function runMain(): Promise<void> {
 				return;
 			}
 
-			const execResult = await core.group(
-				'🚀 Run command in container',
-				async () => {
-					const args: DevContainerCliExecArgs = {
-						workspaceFolder,
-						command: ['bash', '-c', runCommand],
-						env: inputEnvsWithDefaults,
-						userDataFolder,
-					};
-					let execLogString = '';
-					const execLog = (message: string): void => {
-						core.info(message);
-						if (!message.includes('@devcontainers/cli')) {
-							execLogString += message;
-						}
-					};
-					const exitCode = await devcontainer.exec(args, execLog);
-					if (exitCode !== 0) {
-						const errorMessage = `Dev container exec failed: (exit code: ${exitCode})`;
-						core.error(errorMessage);
-						core.setFailed(errorMessage);
-					}
-					core.setOutput('runCmdOutput', execLogString);
-					if (Buffer.byteLength(execLogString, 'utf-8') > 1000000) {
-						execLogString = truncate(execLogString, 999966);
-						execLogString += 'TRUNCATED TO 1 MB MAX OUTPUT SIZE';
-					}
-					core.setOutput('runCmdOutput', execLogString);
-					return exitCode;
-				},
-			);
-			if (execResult !== 0) {
+			const args: DevContainerCliExecArgs = {
+				workspaceFolder,
+				configFile,
+				command: ['bash', '-c', runCommand],
+				env: inputEnvsWithDefaults,
+				userDataFolder,
+			};
+			let execLogString = '';
+			const execLog = (message: string): void => {
+				core.info(message);
+				if (!message.includes('@devcontainers/cli')) {
+					execLogString += message;
+				}
+			};
+			const exitCode = await devcontainer.exec(args, execLog);
+			if (exitCode !== 0) {
+				const errorMessage = `Dev container exec failed: (exit code: ${exitCode})`;
+				core.error(errorMessage);
+				core.setFailed(errorMessage);
+			}
+			core.setOutput('runCmdOutput', execLogString);
+			if (Buffer.byteLength(execLogString, 'utf-8') > 1000000) {
+				execLogString = truncate(execLogString, 999966);
+				execLogString += 'TRUNCATED TO 1 MB MAX OUTPUT SIZE';
+			}
+			core.setOutput('runCmdOutput', execLogString);
+			if (exitCode !== 0) {
 				return;
 			}
 		} else {
@@ -248,7 +253,7 @@ export async function runPost(): Promise<void> {
 
 	const imageTag =
 		emptyStringAsUndefined(core.getInput('imageTag')) ?? 'latest';
-	const imageTagArray = imageTag.split(',');
+	const imageTagArray = imageTag.split(/\s*,\s*/);
 	if (!imageName) {
 		if (pushOption) {
 			// pushOption was set (and not to "never") - give an error that imageName is required
